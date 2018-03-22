@@ -1,47 +1,10 @@
 import gi
 import sys
 import numpy
-import RTCException
+from RTCException import *
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GObject, GLib
-
-
-class RTCCodecError(RTCException.RTCBaseError):
-    """Исключение вызывается в случае ошибки кодека
-    Аттрибуты:
-        codec -- кодек из-за которого произошла ошибка
-        остальное наследуется из базового класса"""
-
-    def __init__(self, codec, msg):
-        super(RTCCodecError, self).__init__(None, codec + ": " + msg)
-        self.expression = None
-        self.codec = codec
-        self.message = msg
-
-
-class RTCPipelineError(RTCException.RTCBaseError):
-    """Исключение вызывается в случае ошибки pipeline
-    Аттрибуты:
-        наследуются из базового класса"""
-
-    def __init__(self, msg):
-        super(RTCPipelineError, self).__init__(None, msg)
-        self.expression = None
-
-
-class RTCLinkError(RTCException.RTCBaseError):
-    """Исключение вызывается в случае ошибки линковки
-    Аттрибуты:
-        targetlink -- первый объект линковки
-        linkto -- второй объект линковки
-    """
-
-    def __init__(self, targetlink, linkto):
-        super(RTCLinkError, self).__init__(None, "Не получается линковать объект " + targetlink + " с объектом " + linkto)
-        self.expression = None
-        self.targetlink = targetlink
-        self.linkto = linkto
 
 
 class CVGstreamer:
@@ -113,7 +76,7 @@ class CVGstreamer:
     def initElements(self):  # инициализация компонентов
         self.player = Gst.Pipeline.new("player")  # создаем pipeline
         if not self.player:
-            raise RTCException.RTCInternalError("player", "Не получается создать объект pipeline")
+            raise RTCInternalError("player", "Не получается создать объект pipeline")
 
         self.bus = self.player.get_bus()  # создаем шину передачи сообщений и ошибок от GST
         self.bus.add_signal_watch()
@@ -134,7 +97,7 @@ class CVGstreamer:
             raise RTCCodecError(self.codec, "такого кодека нет")
 
         if not self.videodepay0:
-            raise RTCException.RTCInternalError("videodepay0", "Не получается создать объект videodepay")
+            raise RTCInternalError("videodepay0", "Не получается создать объект videodepay")
 
         """ SOURCE """
         self.rtpbin = Gst.ElementFactory.make('rtpbin', 'rtpbin')  # создаем rtpbin
@@ -197,12 +160,12 @@ class CVGstreamer:
             raise RTCCodecError(self.codec, "такого кодека нет")
 
         if not self.decoder0:
-            raise RTCException.RTCInternalError("decoder0", "Не получается создать объект decoder")
+            raise RTCInternalError("decoder0", "Не получается создать объект decoder")
 
         """ VIDEOCONVERT """
         self.videoconvert0 = Gst.ElementFactory.make("videoconvert", "videoconvert0")
         if not self.videoconvert0:
-            raise RTCException.RTCInternalError("videoconvert0", "Не получается создать объект videoconvert")
+            raise RTCInternalError("videoconvert0", "Не получается создать объект videoconvert")
 
         """ CAPS AND SINK """
         def gst_to_opencv(sample):  # создаем матрицу пикселей
@@ -225,7 +188,7 @@ class CVGstreamer:
         """ создаем свой sink для перевода из GST в CV """
         self.sink = Gst.ElementFactory.make("appsink", "sink")
         if not self.sink:
-            raise RTCException.RTCInternalError("sink", "Не получается создать объект sink")
+            raise RTCInternalError("sink", "Не получается создать объект sink")
 
         caps = Gst.caps_from_string("video/x-raw, format=(string){BGR, GRAY8}")  # формат приема sink'a
         self.sink.set_property("caps", caps)
@@ -236,7 +199,7 @@ class CVGstreamer:
         """ VIDEOSCALE """
         self.videoscale0 = Gst.ElementFactory.make("videoscale", "videoscale0")  # растягиваем изображение
         if not self.videoscale0:
-            raise RTCException.RTCInternalError("videoscale0", "Не получается создать объект videoscale")
+            raise RTCInternalError("videoscale0", "Не получается создать объект videoscale")
 
         self.player.add(self.videodepay0)  # добавляем все элементы в pipeline
         self.player.add(self.decoder0)
