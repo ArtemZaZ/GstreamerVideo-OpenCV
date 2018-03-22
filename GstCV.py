@@ -1,8 +1,47 @@
 import gi
 import sys
 import numpy
+import RTCException
+
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GObject, GLib
+
+
+class RTCCodecError(RTCException.RTCBaseError):
+    """Исключение вызывается в случае ошибки кодека
+    Аттрибуты:
+        codec -- кодек из-за которого произошла ошибка
+        остальное наследуется из базового класса"""
+
+    def __init__(self, codec, msg):
+        super(RTCCodecError, self).__init__(None, codec + ": " + msg)
+        self.expression = None
+        self.codec = codec
+        self.message = msg
+
+
+class RTCPipelineError(RTCException.RTCBaseError):
+    """Исключение вызывается в случае ошибки pipeline
+    Аттрибуты:
+        наследуются из базового класса"""
+
+    def __init__(self, msg):
+        super(RTCPipelineError, self).__init__(None, msg)
+        self.expression = None
+
+
+class RTCLinkError(RTCException.RTCBaseError):
+    """Исключение вызывается в случае ошибки линковки
+    Аттрибуты:
+        targetlink -- первый объект линковки
+        linkto -- второй объект линковки
+    """
+
+    def __init__(self, targetlink, linkto):
+        super(RTCLinkError, self).__init__(None, "Не получается линковать объект " + targetlink + " с объектом " + linkto)
+        self.expression = None
+        self.targetlink = targetlink
+        self.linkto = linkto
 
 
 class CVGstreamer:
@@ -21,8 +60,7 @@ class CVGstreamer:
             self.VIDEO_CAPS = "application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(" \
                               "string)H264,payload=(int)96"  # caps приема
         else:
-            print("Error: Такого кодека нет")
-            sys.exit(1)
+            raise RTCCodecError(self.codec, "такого кодека нет")
 
         self.IP = IP  # ip приема
         self.RTP_RECV_PORT0 = RTP_RECV_PORT  # Порты приема
@@ -45,7 +83,7 @@ class CVGstreamer:
             if state == Gst.State.PAUSED:  # если перед этим была вызвана пауза
                 self.player.set_state(Gst.State.PLAYING)
             elif state == Gst.State.PLAYING:  # если видос уже запущен
-                print("Error: Нельзя два раза запустить видос")
+                raise RTCPipelineError("Нельзя повторно запустить видео")
             else:  # если перед этим было вызвано stop
                 self.playPipe()  # запустить pipeline
 
@@ -54,18 +92,17 @@ class CVGstreamer:
             if ((
                     self.player.get_state(
                         Gst.CLOCK_TIME_NONE).state) == Gst.State.NULL):  # если перед этим было вызвано stop
-                print("Error: Нельзя поставить на паузу освобожденные ресурсы")
+                raise RTCPipelineError("Нельзя поставить на паузу освобожденные ресурсы")
             else:
                 self.player.set_state(Gst.State.PAUSED)
 
     def stop(self):  # остановка и освобождение ресурсов
         if self.player:
             self.player.set_state(Gst.State.NULL)
-            print("STOP")
 
     def on_error(self, bus, msg):  # прием ошибок
         err, dbg = msg.parse_error()
-        print("ERROR:", msg.src.get_name(), ":", err.message)
+        print("ERROR:", msg.src.get_name(), ":", err.message)  # нужно ли тут вообще исключение?
         if dbg:
             print("Debug info:", dbg)
 
@@ -76,15 +113,14 @@ class CVGstreamer:
     def initElements(self):  # инициализация компонентов
         self.player = Gst.Pipeline.new("player")  # создаем pipeline
         if not self.player:
-            print("ERROR: Could not create pipeline.")
-            sys.exit(1)
+            raise RTCException.RTCInternalError("player", "Не получается создать объект pipeline")
 
         self.bus = self.player.get_bus()  # создаем шину передачи сообщений и ошибок от GST
         self.bus.add_signal_watch()
         self.bus.connect("message::error", self.on_error)
         self.bus.connect("message::eos", self.on_eos)
 
-        ################ VIDEODEPAY ################################
+        """ VIDEODEPAY """
         self.videodepay0 = None
 
         if self.codec == "JPEG":
@@ -94,18 +130,18 @@ class CVGstreamer:
         elif self.codec == "H264":
             self.videodepay0 = Gst.ElementFactory.make('rtph264depay',
                                                        'videodepay0')  # создаем раскпаковщик видео формата h264
+        else:
+            raise RTCCodecError(self.codec, "такого кодека нет")
 
         if not self.videodepay0:
-            print("ERROR: Could not create videodepay0.")
-            sys.exit(1)
+            raise RTCException.RTCInternalError("videodepay0", "Не получается создать объект videodepay")
 
-        ################  SOURCE  ##################################      
-
+        """ SOURCE """
         self.rtpbin = Gst.ElementFactory.make('rtpbin', 'rtpbin')  # создаем rtpbin
         self.player.add(self.rtpbin)  # добавляем его в Pipeline
         self.caps = Gst.caps_from_string(self.VIDEO_CAPS)  # в каком формате принимать видео
 
-        ### дальше идет очень странная система RTP 
+        """ дальше идет очень странная система RTP """
         def pad_added_cb(rtpbin, new_pad, depay):
             sinkpad = Gst.Element.get_static_pad(depay, 'sink')
             lres = Gst.Pad.link(new_pad, sinkpad)
@@ -113,8 +149,7 @@ class CVGstreamer:
         self.rtpsrc0 = Gst.ElementFactory.make('udpsrc', 'rtpsrc0')
         self.rtpsrc0.set_property('port', self.RTP_RECV_PORT0)
 
-        # we need to set caps on the udpsrc for the RTP data
-
+        """ we need to set caps on the udpsrc for the RTP data """
         self.rtpsrc0.set_property('caps', self.caps)
 
         self.rtcpsrc0 = Gst.ElementFactory.make('udpsrc', 'rtcpsrc0')
@@ -124,7 +159,7 @@ class CVGstreamer:
         self.rtcpsink0.set_property('port', self.RTCP_SEND_PORT0)
         self.rtcpsink0.set_property('host', self.IP)
 
-        # no need for synchronisation or preroll on the RTCP sink
+        """ no need for synchronisation or preroll on the RTCP sink """
         self.rtcpsink0.set_property('async', False)
         self.rtcpsink0.set_property('sync', False)
         self.player.add(self.rtpsrc0, self.rtcpsrc0, self.rtcpsink0)
@@ -134,12 +169,12 @@ class CVGstreamer:
         self.sinkpad0 = Gst.Element.get_request_pad(self.rtpbin, 'recv_rtp_sink_0')
         self.lres0 = Gst.Pad.link(self.srcpad0, self.sinkpad0)
 
-        # get an RTCP sinkpad in session 0
+        """ get an RTCP sinkpad in session 0 """
         self.srcpad0 = Gst.Element.get_static_pad(self.rtcpsrc0, 'src')
         self.sinkpad0 = Gst.Element.get_request_pad(self.rtpbin, 'recv_rtcp_sink_0')
         self.lres0 = Gst.Pad.link(self.srcpad0, self.sinkpad0)
 
-        # get an RTCP srcpad for sending RTCP back to the sender
+        """ get an RTCP srcpad for sending RTCP back to the sender """
         self.srcpad0 = Gst.Element.get_request_pad(self.rtpbin, 'send_rtcp_src_0')
         self.sinkpad0 = Gst.Element.get_static_pad(self.rtcpsink0, 'sink')
         self.lres0 = Gst.Pad.link(self.srcpad0, self.sinkpad0)
@@ -149,7 +184,7 @@ class CVGstreamer:
 
         self.rtpbin.connect('pad-added', pad_added_cb, self.videodepay0)
 
-        ############### DECODER ######################################
+        """ DECODER """
         self.decoder0 = None
 
         if self.codec == "JPEG":
@@ -158,19 +193,18 @@ class CVGstreamer:
         elif self.codec == "H264":
             self.decoder0 = Gst.ElementFactory.make('avdec_h264', "decoder0")  # декодирует h264 формат
 
+        else:
+            raise RTCCodecError(self.codec, "такого кодека нет")
+
         if not self.decoder0:
-            print("ERROR: Could not create decoder0.")
-            sys.exit(1)
+            raise RTCException.RTCInternalError("decoder0", "Не получается создать объект decoder")
 
-        ######################## VIDEOCONVERT ############################
-
+        """ VIDEOCONVERT """
         self.videoconvert0 = Gst.ElementFactory.make("videoconvert", "videoconvert0")
         if not self.videoconvert0:
-            print("ERROR: Could not create videoconvert0.")
-            sys.exit(1)
+            raise RTCException.RTCInternalError("videoconvert0", "Не получается создать объект videoconvert")
 
-        ######################### CAPS AND SINK ###########################
-
+        """ CAPS AND SINK """
         def gst_to_opencv(sample):  # создаем матрицу пикселей
             buf = sample.get_buffer()
             caps = sample.get_caps()
@@ -188,11 +222,10 @@ class CVGstreamer:
             self.cvImage = arr  # openCV image
             return Gst.FlowReturn.OK
 
-        ### создаем свой sink для перевода из GST в CV
+        """ создаем свой sink для перевода из GST в CV """
         self.sink = Gst.ElementFactory.make("appsink", "sink")
         if not self.sink:
-            print("ERROR: Could not create sink.")
-            sys.exit(1)
+            raise RTCException.RTCInternalError("sink", "Не получается создать объект sink")
 
         caps = Gst.caps_from_string("video/x-raw, format=(string){BGR, GRAY8}")  # формат приема sink'a
         self.sink.set_property("caps", caps)
@@ -200,14 +233,11 @@ class CVGstreamer:
         self.sink.set_property("emit-signals", True)
         self.sink.connect("new-sample", new_buffer, self.sink)
 
-        ######################### VIDEOSCALE ##################################
-
+        """ VIDEOSCALE """
         self.videoscale0 = Gst.ElementFactory.make("videoscale", "videoscale0")  # растягиваем изображение
         if not self.videoscale0:
-            print("ERROR: Could not create videoscale0.")
-            sys.exit(1)
+            raise RTCException.RTCInternalError("videoscale0", "Не получается создать объект videoscale")
 
-        ##################################################################
         self.player.add(self.videodepay0)  # добавляем все элементы в pipeline
         self.player.add(self.decoder0)
         self.player.add(self.videoscale0)
@@ -217,20 +247,16 @@ class CVGstreamer:
     def linkElements(self):  # функция линковки элементов
         link_ok = self.videodepay0.link(self.decoder0)
         if not link_ok:
-            print("ERROR: Could not link videodepay0 with decoder0.")
-            sys.exit(1)
+            raise RTCLinkError("videodepay0", "decoder0")
 
         link_ok = self.decoder0.link(self.videoconvert0)
         if not link_ok:
-            print("ERROR: Could not link decoder0 with videoconvert0.")
-            sys.exit(1)
+            raise RTCLinkError("decoder0", "videoconvert0")
 
         link_ok = self.videoconvert0.link(self.videoscale0)
         if not link_ok:
-            print("ERROR: Could not link videoconvert0 with videoscale0.")
-            sys.exit(1)
+            raise RTCLinkError("videoconvert0", "videoscale0")
 
         link_ok = self.videoscale0.link(self.sink)
         if not link_ok:
-            print("ERROR: Could not link videoscale0 with sink.")
-            sys.exit(1)
+            raise RTCLinkError("videoscale0", "sink")
