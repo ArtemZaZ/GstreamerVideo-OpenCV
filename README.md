@@ -15,9 +15,14 @@ RTCP_SEND_PORT0 = 5005
 ```
 ## CVGstreamer 
 Класс предоставляющий методы для работы с видеопотоком gstreamera, возможность выхватывать из потока
-изображение и отправлять в OpenCV. В качастве параметров передаются ip, порты и какой нужен кодек(**'JPEG' или 'H264'**)
+изображение и отправлять в OpenCV. В качастве параметров передаются ip, порты, какой нужен кодек(**'JPEG' или 'H264'**).                
+Параметр **toAVS** определяет куда будет стримиться видео в autovideosink(**True**) или в appsink(**False**)
+Если видео стримится в autovideosink, то оно отображается на экране через стандартный элемент gstreamer'a, переменная **cvImage** 
+при этом равна **None**.
+Если видео стримится в appsink, то его кадры записываются в переменную **cvImage** и должны быть отображены самостоятельно.
+
 ```
-CVG=GstCV.CVGstreamer(IP, RTP_RECV_PORT0, RTCP_RECV_PORT0, RTCP_SEND_PORT0, codec = 'H264')
+CVG=GstCV.CVGstreamer(IP, RTP_RECV_PORT0, RTCP_RECV_PORT0, RTCP_SEND_PORT0, codec='H264', toAVS=True)
 ```
 ## Методы
 ### video pipeline
@@ -29,10 +34,19 @@ video.start()
 ```
 video.paused()
 ```
-Остановка метода с освобождением контекста
+Остановка метода с освобождением ресурсов
 ```
 video.stop()
 ```
+Перевод потока видео в appsink
+```
+video.toAppSink()
+```
+Перевод потока видео в autovideosink
+```
+video.toAutoVideoSink()
+```
+
 ## OpenCV
 Изображение, полученное с Gstreamera и переведенное в CV хранится в переменной **cvImage** экземпляра класса CVGstreamer
 ```
